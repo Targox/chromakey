@@ -35,7 +35,7 @@ func discover(in apps: [NSRunningApplication]) -> Discovery? {
     var matches: [Discovery] = []
     for app in apps {
         let root = AXUIElementCreateApplication(app.processIdentifier)
-        AXUIElementSetMessagingTimeout(root, 0.3)
+        AXUIElementSetMessagingTimeout(root, 0.75)
         for window in attribute(root, kAXWindowsAttribute) as? [AXUIElement] ?? []
             where text(window, kAXTitleAttribute) == "Verification Code" {
             var codes = Set<String>()
@@ -46,7 +46,7 @@ func discover(in apps: [NSRunningApplication]) -> Discovery? {
                 visited += 1
                 for key in [kAXValueAttribute, kAXTitleAttribute] {
                     let value = text(node, key)
-                    if value.contains("Enable Password AutoFill for “Helium”") { isHelium = true }
+                    if value.contains("Enable Password AutoFill") && value.contains("Helium") { isHelium = true }
                     if let code = parseCode(value) { codes.insert(code) }
                 }
                 for child in attribute(node, kAXChildrenAttribute) as? [AXUIElement] ?? [] { read(child, depth + 1) }
@@ -201,7 +201,11 @@ final class HUD: NSPanel {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    var status: NSStatusItem!
+    var settingsWindow: NSWindow?
+    var accessibilityLabel: NSTextField?
+    var settingsTimer: Timer?
+    var trusted = false
+    var enabled: Bool { !UserDefaults.standard.bool(forKey: "paused") }
     var hud: HUD?
     var helpers: [NSRunningApplication] = []
     var observers: [pid_t: AXObserver] = [:]
@@ -216,14 +220,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var handler: EventHandlerRef?
     var busy = false
     func applicationDidFinishLaunching(_ notification: Notification) {
-        status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        status.button?.image = NSImage(systemSymbolName: "key", accessibilityDescription: "Verification Code Shortcut")
-        let menu = NSMenu()
-        for (title, action) in [("Find code    ⌃⌥⌘V", #selector(scan)),
-                                ("Accessibility Settings…", #selector(settings)), ("Quit", #selector(quit))] {
-            menu.addItem(withTitle: title, action: action, keyEquivalent: "").target = self
-        }
-        status.menu = menu
         var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
             guard let context, let event else { return noErr }
@@ -240,8 +236,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(appChanged), name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         center.addObserver(self, selector: #selector(appChanged), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
+        center.addObserver(self, selector: #selector(wake), name: NSWorkspace.didWakeNotification, object: nil)
+        center.addObserver(self, selector: #selector(wake), name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(settingsRequested),
+            name: Notification.Name("local.zimeng.verification-code-shortcut.settings"), object: String(getuid()))
         connect()
-
+        if !CommandLine.arguments.contains("--background") { showSettings() }
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showSettings()
+        return false
+    }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    @objc func wake(_ notification: Notification) { connect() }
+    @objc func settingsRequested(_ notification: Notification) { showSettings() }
+    @objc func showSettings() {
+        if settingsWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 168),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "Chromakey"
+            window.isReleasedWhenClosed = false
+            let toggle = NSButton(checkboxWithTitle: "Enabled", target: self, action: #selector(toggleEnabled))
+            toggle.state = enabled ? .on : .off
+            toggle.frame = NSRect(x: 20, y: 118, width: 260, height: 24)
+            window.contentView?.addSubview(toggle)
+            let label = NSTextField(labelWithString: "")
+            label.frame = NSRect(x: 20, y: 86, width: 260, height: 20)
+            label.font = .systemFont(ofSize: 13)
+            window.contentView?.addSubview(label)
+            accessibilityLabel = label
+            let permissions = NSButton(title: "Accessibility Settings…", target: self, action: #selector(settings))
+            permissions.bezelStyle = .rounded
+            permissions.frame = NSRect(x: 16, y: 43, width: 268, height: 32)
+            window.contentView?.addSubview(permissions)
+            let quit = NSButton(title: "Quit", target: self, action: #selector(quit))
+            quit.bezelStyle = .rounded
+            quit.frame = NSRect(x: 210, y: 8, width: 74, height: 28)
+            window.contentView?.addSubview(quit)
+            window.center()
+            settingsWindow = window
+        }
+        updateSettings()
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        if settingsTimer == nil {
+            settingsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                if self.settingsWindow?.isVisible == true { self.updateSettings() }
+                else { self.settingsTimer?.invalidate(); self.settingsTimer = nil }
+            }
+        }
+    }
+    func updateSettings() {
+        accessibilityLabel?.stringValue = AXIsProcessTrusted() ? "Accessibility: Allowed" : "Accessibility: Not allowed"
+    }
+    @objc func toggleEnabled(_ sender: NSButton) {
+        UserDefaults.standard.set(sender.state != .on, forKey: "paused")
+        clear()
+        handled = nil
+        connect()
     }
     @objc func appChanged(_ notification: Notification) {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
@@ -256,7 +309,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         helpers = NSWorkspace.shared.runningApplications.filter {
             $0.bundleIdentifier == "com.apple.PasswordManagerBrowserExtensionHelper" && !$0.isTerminated
         }
-        fallback = !AXIsProcessTrusted()
+        trusted = AXIsProcessTrusted()
+        fallback = !trusted
         if !fallback {
             for app in helpers {
                 var observer: AXObserver?
@@ -299,17 +353,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     func updateTimer() {
-        let interval: TimeInterval? = (pending != nil || handled != nil) ? 0.8 : (fallback ? 5 : nil)
-        if let interval, timer?.timeInterval == interval { return }
-        timer?.invalidate()
-        timer = nil
-        if let interval {
-            timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-                guard let self else { return }
-                if self.fallback { self.connect() } else { self.poll() }
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: 0.8, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let live = NSWorkspace.shared.runningApplications.filter {
+                $0.bundleIdentifier == "com.apple.PasswordManagerBrowserExtensionHelper" && !$0.isTerminated
             }
-            timer?.tolerance = interval * 0.2
+            if Set(live.map(\.processIdentifier)) != Set(self.helpers.map(\.processIdentifier)) ||
+                AXIsProcessTrusted() != self.trusted || (self.fallback && AXIsProcessTrusted()) {
+                self.connect()
+            } else { self.poll() }
         }
+        timer.tolerance = 0.08
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
     func bind(_ id: UInt32, _ key: UInt32, _ modifiers: UInt32, _ ref: inout EventHotKeyRef?) -> Bool {
         RegisterEventHotKey(key, modifiers, EventHotKeyID(signature: 0x56435343, id: id),
@@ -327,10 +384,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func refresh() {
         guard !busy else { return }
         defer { updateTimer() }
+        guard enabled else { clear(); handled = nil; return }
         guard let found = discover(in: helpers) else { clear(); handled = nil; return }
         if handled?.matches(found) == true { return }
         if pending?.matches(found) == true {
-            if hud?.position(below: found.window) != true { clear() }
+            hud?.show(below: found.window)
             return
         }
         clear()
@@ -365,10 +423,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     func finish() { busy = false; poll() }
-    func type(_ found: Discovery, target: Destination, index: Int) {
-        guard let current = discover(in: helpers), current.matches(found),
-              let focused = destination(), focused.matches(target), focused.index == index,
-              validPrefix(focused.values, code: found.code, index: index) else { finish(); return }
+    func type(_ found: Discovery, target: Destination, index: Int, retry: Int = 0) {
+        guard enabled, let current = discover(in: helpers), current.matches(found),
+              let focused = destination(), focused.matches(target) else { finish(); return }
+        if focused.index != index || !validPrefix(focused.values, code: found.code, index: index) {
+            let waiting = index > 0 && (focused.index == index - 1 || focused.index == index) &&
+                (validPrefix(focused.values, code: found.code, index: index - 1) ||
+                 validPrefix(focused.values, code: found.code, index: index))
+            if waiting && retry < 20 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self] in
+                    self?.type(found, target: target, index: index, retry: retry + 1)
+                }
+            } else { finish() }
+            return
+        }
         var digit = Array(found.code.utf16)[index]
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else { finish(); return }
@@ -396,7 +464,14 @@ let directory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Verification Code Shortcut")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                             attributes: [.posixPermissions: 0o700])
-    guard lockInstance(at: directory.appendingPathComponent("instance.lock").path) >= 0 else { exit(0) }
+    guard lockInstance(at: directory.appendingPathComponent("instance.lock").path) >= 0 else {
+        if !CommandLine.arguments.contains("--background") {
+            DistributedNotificationCenter.default().postNotificationName(
+                Notification.Name("local.zimeng.verification-code-shortcut.settings"),
+                object: String(getuid()), userInfo: nil, deliverImmediately: true)
+        }
+        exit(0)
+    }
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let delegate = AppDelegate()

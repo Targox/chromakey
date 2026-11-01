@@ -57,7 +57,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           ./build.sh
-          ditto -c -k --sequesterRsrc --keepParent 'build/Verification Code Shortcut.app' "build/VerificationCodeShortcut-${VERSION}.zip"
+          ditto -c -k --sequesterRsrc --keepParent 'build/Chromakey.app' "build/VerificationCodeShortcut-${VERSION}.zip"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: VerificationCodeShortcut-${{ steps.version.outputs.version }}
