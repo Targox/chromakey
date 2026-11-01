@@ -147,7 +147,7 @@ final class HUD: NSPanel {
     let clickSurface = OverlayClickSurface()
     var onFill: (() -> Void)?
     init() {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 260, height: 32),
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 288, height: 32),
                    styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         isOpaque = false
         backgroundColor = .clear
@@ -162,7 +162,14 @@ final class HUD: NSPanel {
         hidesOnDeactivate = false
         ignoresMouseEvents = false
         becomesKeyOnlyIfNeeded = true
-        label.frame = contentView!.bounds.insetBy(dx: 12, dy: 8)
+        let icon = NSImageView(frame: NSRect(x: 6, y: 4, width: 24, height: 24))
+        if let resource = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") {
+            icon.image = NSImage(contentsOf: resource)
+        }
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.setAccessibilityElement(false)
+        contentView!.addSubview(icon)
+        label.frame = NSRect(x: 36, y: 8, width: 240, height: 16)
         label.autoresizingMask = [.width, .height]
         label.font = .systemFont(ofSize: 12)
         label.textColor = NSColor(white: 0.92, alpha: 1)
