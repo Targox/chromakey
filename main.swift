@@ -46,7 +46,7 @@ func discover(in apps: [NSRunningApplication]) -> Discovery? {
                 visited += 1
                 for key in [kAXValueAttribute, kAXTitleAttribute] {
                     let value = text(node, key)
-                    if value.contains("Enable Password AutoFill") && value.contains("Helium") { isHelium = true }
+                    if ["Enable Password AutoFill for “Helium”", "Enable Password AutoFill for \"Helium\""].contains(value) { isHelium = true }
                     if let code = parseCode(value) { codes.insert(code) }
                 }
                 for child in attribute(node, kAXChildrenAttribute) as? [AXUIElement] ?? [] { read(child, depth + 1) }
@@ -210,7 +210,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var helpers: [NSRunningApplication] = []
     var observers: [pid_t: AXObserver] = [:]
     var fallback = false
-    var scheduled: DispatchWorkItem?
     var timer: Timer?
     var pending: Discovery?
     var handled: Discovery?
@@ -236,6 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(appChanged), name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         center.addObserver(self, selector: #selector(appChanged), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
+        center.addObserver(self, selector: #selector(wake), name: NSWorkspace.didActivateApplicationNotification, object: nil)
         center.addObserver(self, selector: #selector(wake), name: NSWorkspace.didWakeNotification, object: nil)
         center.addObserver(self, selector: #selector(wake), name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(settingsRequested),
@@ -314,43 +314,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !fallback {
             for app in helpers {
                 var observer: AXObserver?
-                let result = AXObserverCreate(app.processIdentifier, { _, _, notification, context in
+                let result = AXObserverCreate(app.processIdentifier, { _, element, _, context in
                     guard let context else { return }
                     let app = Unmanaged<AppDelegate>.fromOpaque(context).takeUnretainedValue()
-                    app.queueRefresh()
-                    if notification as String == kAXWindowCreatedNotification {
-                        for delay in [0.5, 2.0] {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak app] in app?.poll() }
-                        }
-                    }
+                    app.watch(element)
+                    app.poll()
                 }, &observer)
                 guard result == .success, let observer else { fallback = true; continue }
                 let root = AXUIElementCreateApplication(app.processIdentifier)
                 let context = Unmanaged.passUnretained(self).toOpaque()
-                let added = AXObserverAddNotification(observer, root, kAXWindowCreatedNotification as CFString, context)
-                guard added == .success else { fallback = true; continue }
+                var registered = false
+                for name in [kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification,
+                             kAXMainWindowChangedNotification, kAXFocusedUIElementChangedNotification,
+                             kAXCreatedNotification, kAXLayoutChangedNotification, kAXValueChangedNotification] {
+                    if AXObserverAddNotification(observer, root, name as CFString, context) == .success {
+                        registered = true
+                    }
+                }
+                guard registered else { fallback = true; continue }
                 observers[app.processIdentifier] = observer
                 CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
             }
         }
         poll()
     }
-    func queueRefresh() {
-        guard scheduled == nil else { return }
-        let work = DispatchWorkItem { [weak self] in
-            self?.scheduled = nil
-            self?.poll()
-        }
-        scheduled = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04, execute: work)
-    }
     func watch(_ window: AXUIElement) {
         var pid: pid_t = 0
         AXUIElementGetPid(window, &pid)
         guard let observer = observers[pid] else { return }
-        for notification in [kAXUIElementDestroyedNotification, kAXMovedNotification, kAXResizedNotification] {
-            AXObserverAddNotification(observer, window, notification as CFString, Unmanaged.passUnretained(self).toOpaque())
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        for name in [kAXUIElementDestroyedNotification, kAXMovedNotification, kAXResizedNotification,
+                     kAXLayoutChangedNotification, kAXValueChangedNotification, kAXCreatedNotification,
+                     kAXElementBusyChangedNotification, kAXTitleChangedNotification] {
+            AXObserverAddNotification(observer, window, name as CFString, context)
         }
+        var visited = 0
+        func subscribe(_ node: AXUIElement, _ depth: Int) {
+            guard depth < 16, visited < 300 else { return }
+            visited += 1
+            for name in [kAXValueChangedNotification, kAXCreatedNotification, kAXLayoutChangedNotification] {
+                AXObserverAddNotification(observer, node, name as CFString, context)
+            }
+            for child in attribute(node, kAXChildrenAttribute) as? [AXUIElement] ?? [] { subscribe(child, depth + 1) }
+        }
+        subscribe(window, 0)
     }
     func updateTimer() {
         guard timer == nil else { return }

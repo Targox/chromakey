@@ -15,6 +15,7 @@ cask "verification-code-shortcut" do
   app "Chromakey.app", target: "#{Dir.home}/Applications/Chromakey.app"
 
   preflight_steps do
+    terminate_process "VerificationCodeShortcut", match: :name
     run "/bin/launchctl", args: ["bootout", "gui/#{Process.uid}/local.zimeng.verification-code-shortcut"],
         must_succeed: false, print_stderr: false
   end
@@ -39,8 +40,11 @@ cask "verification-code-shortcut" do
     system_command "/bin/launchctl", args: ["bootstrap", "gui/#{Process.uid}", agent.to_s]
   end
 
-  uninstall launchctl: "local.zimeng.verification-code-shortcut",
-            quit: "local.zimeng.verification-code-shortcut"
+  uninstall launchctl: "local.zimeng.verification-code-shortcut"
+
+  uninstall_preflight_steps do
+    terminate_process "VerificationCodeShortcut", match: :name
+  end
 
   uninstall_postflight_steps do
     remove "#{Dir.home}/Library/LaunchAgents/local.zimeng.verification-code-shortcut.plist"
