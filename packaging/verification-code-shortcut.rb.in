@@ -23,6 +23,7 @@ cask "verification-code-shortcut" do
   postflight do
     path = "#{Dir.home}/Applications/Chromakey.app"
     system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", path], must_succeed: false
+    system_command "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", args: ["-f", path]
     agent = Pathname("#{Dir.home}/Library/LaunchAgents/local.zimeng.verification-code-shortcut.plist")
     agent.dirname.mkpath
     agent.write <<~PLIST
