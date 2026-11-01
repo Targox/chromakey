@@ -23,14 +23,37 @@ func parseCode(_ value: String) -> String? {
     guard code.utf8.count == 6, code.utf8.allSatisfy({ (48...57).contains($0) }) else { return nil }
     return code
 }
+struct Browser {
+    let identifier: String
+    let path: String
+    let dialogNames: [String]
+}
+let browsers = [
+    Browser(identifier: "net.imput.helium", path: "/Applications/Helium.app", dialogNames: ["Helium"]),
+    Browser(identifier: "com.google.Chrome", path: "/Applications/Google Chrome.app", dialogNames: ["Chrome", "Google Chrome"])
+]
+func supportedBrowser(_ app: NSRunningApplication?) -> Browser? {
+    guard let app else { return nil }
+    return browsers.first {
+        app.bundleIdentifier == $0.identifier && app.bundleURL?.resolvingSymlinksInPath().path == $0.path
+    }
+}
+func browserIdentifier(for header: String) -> String? {
+    browsers.first { browser in
+        browser.dialogNames.contains { name in
+            header == "Enable Password AutoFill for “\(name)”" || header == "Enable Password AutoFill for \"\(name)\""
+        }
+    }?.identifier
+}
 struct Discovery {
+    let browserID: String
     let code: String
     let window: AXUIElement
     func matches(_ other: Discovery) -> Bool {
-        code == other.code && CFEqual(window, other.window)
+        browserID == other.browserID && code == other.code && CFEqual(window, other.window)
     }
 }
-func discover(in apps: [NSRunningApplication]) -> Discovery? {
+func discover(in apps: [NSRunningApplication], for browserID: String? = nil) -> Discovery? {
     guard AXIsProcessTrusted() else { return nil }
     var matches: [Discovery] = []
     for app in apps {
@@ -39,21 +62,24 @@ func discover(in apps: [NSRunningApplication]) -> Discovery? {
         for window in attribute(root, kAXWindowsAttribute) as? [AXUIElement] ?? []
             where text(window, kAXTitleAttribute) == "Verification Code" {
             var codes = Set<String>()
-            var isHelium = false
+            var matchedBrowsers = Set<String>()
             var visited = 0
             func read(_ node: AXUIElement, _ depth: Int) {
                 guard depth < 16, visited < 300 else { return }
                 visited += 1
                 for key in [kAXValueAttribute, kAXTitleAttribute] {
                     let value = text(node, key)
-                    if ["Enable Password AutoFill for “Helium”", "Enable Password AutoFill for \"Helium\""].contains(value) { isHelium = true }
+                    if let identifier = browserIdentifier(for: value) { matchedBrowsers.insert(identifier) }
                     if let code = parseCode(value) { codes.insert(code) }
                 }
                 for child in attribute(node, kAXChildrenAttribute) as? [AXUIElement] ?? [] { read(child, depth + 1) }
             }
             read(window, 0)
-            guard isHelium else { continue }
-            if codes.count == 1, let code = codes.first { matches.append(Discovery(code: code, window: window)) }
+            guard matchedBrowsers.count == 1, let matchedBrowser = matchedBrowsers.first,
+                  browserID == nil || browserID == matchedBrowser else { continue }
+            if codes.count == 1, let code = codes.first {
+                matches.append(Discovery(browserID: matchedBrowser, code: code, window: window))
+            }
         }
     }
     return matches.count == 1 ? matches[0] : nil
@@ -72,13 +98,14 @@ func validPrefix(_ values: [String], code: String, index: Int) -> Bool {
     return values.indices.allSatisfy { $0 < index ? values[$0] == digits[$0] : values[$0].isEmpty }
 }
 struct Destination {
+    let browserID: String
     let pid: pid_t
     let area: AXUIElement
     let fields: [AXUIElement]
     let values: [String]
     let index: Int
     func matches(_ other: Destination) -> Bool {
-        pid == other.pid && CFEqual(area, other.area) && fields.count == other.fields.count &&
+        browserID == other.browserID && pid == other.pid && CFEqual(area, other.area) && fields.count == other.fields.count &&
             zip(fields, other.fields).allSatisfy { CFEqual($0, $1) }
     }
 }
@@ -88,8 +115,7 @@ func element(_ root: AXUIElement, _ key: String) -> AXUIElement? {
 }
 func destination() -> Destination? {
     guard let app = NSWorkspace.shared.frontmostApplication,
-          app.bundleIdentifier == "net.imput.helium",
-          app.bundleURL?.resolvingSymlinksInPath().path == "/Applications/Helium.app",
+          let browser = supportedBrowser(app),
           let focused = element(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute),
           text(focused, kAXRoleAttribute) == kAXTextFieldRole else { return nil }
     var pid: pid_t = 0
@@ -120,7 +146,7 @@ func destination() -> Destination? {
                 let identifier = text(field, "AXDOMIdentifier")
                 if !identifier.isEmpty && identifier != "PIN\(i)" { return nil }
             }
-            return Destination(pid: pid, area: node, fields: fields,
+            return Destination(browserID: browser.identifier, pid: pid, area: node, fields: fields,
                                values: fields.map { text($0, kAXValueAttribute) }, index: index)
         }
         ancestor = element(node, kAXParentAttribute)
@@ -399,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !busy else { return }
         defer { updateTimer() }
         guard enabled else { clear(); handled = nil; return }
-        guard let found = discover(in: helpers) else { clear(); handled = nil; return }
+        guard let found = discover(in: helpers, for: supportedBrowser(NSWorkspace.shared.frontmostApplication)?.identifier) else { clear(); handled = nil; return }
         if handled?.matches(found) == true { return }
         if pending?.matches(found) == true {
             hud?.show(below: found.window)
@@ -420,6 +446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func dismiss() { handled = pending; clear(); updateTimer() }
     func approve() {
         guard !busy, let found = pending, let target = destination(),
+              target.browserID == found.browserID,
               validPrefix(target.values, code: found.code, index: target.index) else { return }
         busy = true
         clear()
@@ -438,7 +465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func finish() { busy = false; poll() }
     func type(_ found: Discovery, target: Destination, index: Int, retry: Int = 0) {
-        guard enabled, let current = discover(in: helpers), current.matches(found),
+        guard enabled, let current = discover(in: helpers, for: found.browserID), current.matches(found),
               let focused = destination(), focused.matches(target) else { finish(); return }
         if focused.index != index || !validPrefix(focused.values, code: found.code, index: index) {
             let waiting = index > 0 && (focused.index == index - 1 || focused.index == index) &&
