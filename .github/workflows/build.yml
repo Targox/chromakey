@@ -69,7 +69,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "v$VERSION" "build/VerificationCodeShortcut-${VERSION}.zip" --title "v$VERSION" --notes '' --target "$GITHUB_SHA" --latest
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" --jq '.object.sha')" = "$GITHUB_SHA"
+            gh release download "v$VERSION" --pattern "VerificationCodeShortcut-${VERSION}.zip" --dir build --clobber
+          else
+            gh release create "v$VERSION" "build/VerificationCodeShortcut-${VERSION}.zip" --title "v$VERSION" --notes '' --target "$GITHUB_SHA" --latest
+          fi
       - name: Tap
         if: steps.version.outputs.release == 'true'
         env:

@@ -12,7 +12,7 @@ root = Path(__file__).resolve().parent.parent
 archive = root / f'build/VerificationCodeShortcut-{version}.zip'
 digest = hashlib.sha256(archive.read_bytes()).hexdigest()
 key = Path(os.environ['RUNNER_TEMP']) / 'tap-deploy-key'
-key.write_text(os.environ['TAP_DEPLOY_KEY'])
+key.write_text(os.environ['TAP_DEPLOY_KEY'].strip() + '\n')
 key.chmod(0o600)
 os.environ['GIT_SSH_COMMAND'] = f'ssh -i {key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
 known = Path.home()/'.ssh/known_hosts'
