@@ -41,7 +41,8 @@ func supportedBrowser(_ app: NSRunningApplication?) -> Browser? {
 func browserIdentifier(for header: String) -> String? {
     browsers.first { browser in
         browser.dialogNames.contains { name in
-            header == "Enable Password AutoFill for “\(name)”" || header == "Enable Password AutoFill for \"\(name)\""
+            header == "Enable Password AutoFill for “\(name)”" || header == "Enable Password AutoFill for \"\(name)\"" ||
+                header == "Enable Password AutoFill for \(name)"
         }
     }?.identifier
 }
