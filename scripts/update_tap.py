@@ -25,15 +25,22 @@ with tempfile.TemporaryDirectory() as directory:
     tap = Path(directory)/'tap'
     subprocess.run(['git','clone','--depth','1','git@github.com:ZimengXiong/homebrew-tools.git',str(tap)],check=True)
     (tap/'lib').mkdir(exist_ok=True)
-    cask = (root/'packaging/verification-code-shortcut.rb.in').read_text().replace('@VERSION@',version).replace('@SHA256@',digest)
-    (tap/'Casks/verification-code-shortcut.rb').write_text(cask)
+    cask = (root/'packaging/chromakey.rb.in').read_text().replace('@VERSION@',version).replace('@SHA256@',digest)
+    (tap/'Casks/chromakey.rb').write_text(cask)
     shutil.copy2(root/'packaging/verification_code_shortcut_download_strategy.rb',tap/'lib/verification_code_shortcut_download_strategy.rb')
     def git(*args):subprocess.run(['git','-C',str(tap),*args],check=True)
     git('config','user.name','github-actions[bot]')
     git('config','user.email','41898282+github-actions[bot]@users.noreply.github.com')
-    git('add','Casks/verification-code-shortcut.rb','lib/verification_code_shortcut_download_strategy.rb')
+    renames_path = tap/'cask_renames.json'
+    renames = json.loads(renames_path.read_text()) if renames_path.exists() else {}
+    previous = renames.get('verification-code-shortcut')
+    if previous not in (None, 'chromakey'): raise SystemExit(1)
+    renames['verification-code-shortcut'] = 'chromakey'
+    renames_path.write_text(json.dumps(renames, indent=2, sort_keys=True) + '\n')
+    git('rm','--ignore-unmatch','Casks/verification-code-shortcut.rb')
+    git('add','Casks/chromakey.rb','cask_renames.json','lib/verification_code_shortcut_download_strategy.rb')
     if subprocess.run(['git','-C',str(tap),'diff','--cached','--quiet']).returncode:
-        git('commit','-m',f'verification-code-shortcut {version}')
+        git('commit','-m',f'chromakey {version}')
         for attempt in range(3):
             if subprocess.run(['git','-C',str(tap),'push','origin','HEAD:main']).returncode == 0:break
             git('pull','--rebase','origin','main')
