@@ -1,0 +1,9 @@
+build/
+.DS_Store
+assets/AppIcon.iconset/
+assets/icon-work/*.iconset/
+assets/icon-work/passwords.png
+assets/icon-work/chrome.png
+*.p12
+*.pem
+*.keychain-db

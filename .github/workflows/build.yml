@@ -1,0 +1,82 @@
+name: Build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: verification-code-shortcut-build
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15
+    permissions:
+      contents: write
+    env:
+      SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+      SIGNING_P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
+      SIGNING_P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - id: version
+        env:
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: python3 scripts/version.py
+      - name: Signing
+        run: |
+          export SIGNING_KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          python3 - <<'PY'
+          import base64,os,secrets,subprocess
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])
+          certificate=p/'signing.p12'
+          certificate.write_bytes(base64.b64decode(os.environ['SIGNING_P12_BASE64']))
+          password=secrets.token_urlsafe(32)
+          keychain=os.environ['SIGNING_KEYCHAIN']
+          for args in [
+              ['security','create-keychain','-p',password,keychain],
+              ['security','set-keychain-settings','-lut','21600',keychain],
+              ['security','unlock-keychain','-p',password,keychain],
+              ['security','import',str(certificate),'-k',keychain,'-P',os.environ['SIGNING_P12_PASSWORD'],'-T','/usr/bin/codesign'],
+              ['security','set-key-partition-list','-S','apple-tool:,apple:,codesign:','-s','-k',password,keychain]]:
+              subprocess.run(args,check=True,stdout=subprocess.DEVNULL)
+          certificate.unlink()
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('SIGNING_KEYCHAIN='+keychain+'\n')
+          PY
+      - name: Build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ./build.sh
+          ditto -c -k --sequesterRsrc --keepParent 'build/Verification Code Shortcut.app' "build/VerificationCodeShortcut-${VERSION}.zip"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: VerificationCodeShortcut-${{ steps.version.outputs.version }}
+          path: build/VerificationCodeShortcut-*.zip
+          retention-days: 7
+      - name: Release
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" "build/VerificationCodeShortcut-${VERSION}.zip" --title "v$VERSION" --notes '' --target "$GITHUB_SHA" --latest
+      - name: Tap
+        if: steps.version.outputs.release == 'true'
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: python3 scripts/update_tap.py
+      - name: Cleanup
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/signing.p12" "$RUNNER_TEMP/tap-deploy-key"
