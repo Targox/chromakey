@@ -1,7 +1,6 @@
 from pathlib import Path
 import hashlib
 import os
-import shutil
 import subprocess
 import tempfile
 import json
@@ -24,10 +23,8 @@ with known.open('a') as f:
 with tempfile.TemporaryDirectory() as directory:
     tap = Path(directory)/'tap'
     subprocess.run(['git','clone','--depth','1','git@github.com:ZimengXiong/homebrew-tools.git',str(tap)],check=True)
-    (tap/'lib').mkdir(exist_ok=True)
     cask = (root/'packaging/chromakey.rb.in').read_text().replace('@VERSION@',version).replace('@SHA256@',digest)
     (tap/'Casks/chromakey.rb').write_text(cask)
-    shutil.copy2(root/'packaging/verification_code_shortcut_download_strategy.rb',tap/'lib/verification_code_shortcut_download_strategy.rb')
     def git(*args):subprocess.run(['git','-C',str(tap),*args],check=True)
     git('config','user.name','github-actions[bot]')
     git('config','user.email','41898282+github-actions[bot]@users.noreply.github.com')
@@ -38,7 +35,7 @@ with tempfile.TemporaryDirectory() as directory:
     renames['verification-code-shortcut'] = 'chromakey'
     renames_path.write_text(json.dumps(renames, indent=2, sort_keys=True) + '\n')
     git('rm','--ignore-unmatch','Casks/verification-code-shortcut.rb')
-    git('add','Casks/chromakey.rb','cask_renames.json','lib/verification_code_shortcut_download_strategy.rb')
+    git('add','Casks/chromakey.rb','cask_renames.json')
     if subprocess.run(['git','-C',str(tap),'diff','--cached','--quiet']).returncode:
         git('commit','-m',f'chromakey {version}')
         for attempt in range(3):

@@ -315,7 +315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.contentView?.addSubview(copyright)
             let github = NSTextField(labelWithAttributedString: NSAttributedString(string: "GitHub", attributes: [
                 .font: NSFont.systemFont(ofSize: 10.5),
-                .link: URL(string: "https://github.com/ZimengXiong/verification-code-shortcut")!
+                .link: URL(string: "https://github.com/ZimengXiong/chromakey")!
             ]))
             github.frame = NSRect(x: 150, y: 15, width: 48, height: 16)
             github.isSelectable = true
