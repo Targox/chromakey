@@ -1,6 +1,6 @@
 <img src="assets/AppIcon-preview.png" width="80" alt="Chromakey">
 
-# Chromakey
+# Chrom-a-key
 
 why does the [apple passwords chrome extension](https://chromewebstore.google.com/detail/icloud-passwords/pejdijmoenmkgeppbflobdenhhabjlaj?hl=en) ask you for a verification code every single time you reopen a profile?? are they are doing QA on RNG for their crypto department? no idea
 
