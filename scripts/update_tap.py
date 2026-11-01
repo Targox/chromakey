@@ -16,7 +16,8 @@ key.chmod(0o600)
 os.environ['GIT_SSH_COMMAND'] = f'ssh -i {key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
 known = Path.home()/'.ssh/known_hosts'
 known.parent.mkdir(mode=0o700, exist_ok=True)
-with urllib.request.urlopen('https://api.github.com/meta') as response:
+request = urllib.request.Request('https://api.github.com/meta', headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'User-Agent': 'Chromakey'})
+with urllib.request.urlopen(request) as response:
     hostkeys = json.load(response)['ssh_keys']
 with known.open('a') as f:
     for hostkey in hostkeys:f.write('github.com ' + hostkey + '\n')
