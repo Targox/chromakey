@@ -6,7 +6,7 @@ Apple Passwords is so frickin annoying about making you type a code from one win
 
 <img src="media/preview@2x.png" width="528" alt="Chromakey">
 
-<img src="media/settings@2x.png" width="344" alt="Chromakey settings">
+<img src="media/settings@2x.png" width="342" alt="Chromakey settings">
 
 ```sh
 brew install --cask zimengxiong/tools/verification-code-shortcut
