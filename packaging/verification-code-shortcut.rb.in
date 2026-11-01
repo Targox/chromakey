@@ -38,6 +38,9 @@ cask "verification-code-shortcut" do
   end
 
   uninstall launchctl: "local.zimeng.verification-code-shortcut",
-            quit: "local.zimeng.verification-code-shortcut",
-            delete: "~/Library/LaunchAgents/local.zimeng.verification-code-shortcut.plist"
+            quit: "local.zimeng.verification-code-shortcut"
+
+  uninstall_postflight_steps do
+    remove "{{home}}/Library/LaunchAgents/local.zimeng.verification-code-shortcut.plist"
+  end
 end
