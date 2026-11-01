@@ -2,6 +2,7 @@
 set -eu
 cd "${0:A:h}"
 version="${VERSION:-0.1.0}"
+build_number="${BUILD_NUMBER:-$(git rev-list --count HEAD)}"
 identity="${SIGNING_IDENTITY:-}"
 keychain="${SIGNING_KEYCHAIN:-}"
 if [[ -z "$identity" ]]; then
@@ -20,10 +21,10 @@ for arch in arm64 x86_64; do
 done
 lipo -create build/arm64 build/x86_64 -output "$app/Contents/MacOS/VerificationCodeShortcut"
 strip -x "$app/Contents/MacOS/VerificationCodeShortcut"
-python3 - "$app/Contents/Info.plist" "$version" <<'PY'
+python3 - "$app/Contents/Info.plist" "$version" "$build_number" <<'PY'
 import plistlib,sys
 with open(sys.argv[1],'wb') as f:
-    plistlib.dump({'CFBundleIdentifier':'local.zimeng.verification-code-shortcut','CFBundleName':'Chromakey','CFBundleDisplayName':'Chromakey','CFBundleExecutable':'VerificationCodeShortcut','CFBundlePackageType':'APPL','CFBundleVersion':sys.argv[2],'CFBundleShortVersionString':sys.argv[2],'CFBundleIconFile':'AppIcon','LSMinimumSystemVersion':'14.0','LSUIElement':True,'NSHighResolutionCapable':True},f)
+    plistlib.dump({'CFBundleIdentifier':'local.zimeng.verification-code-shortcut','CFBundleName':'Chromakey','CFBundleDisplayName':'Chromakey','CFBundleExecutable':'VerificationCodeShortcut','CFBundlePackageType':'APPL','CFBundleVersion':sys.argv[3],'CFBundleShortVersionString':sys.argv[2],'CFBundleIconFile':'AppIcon','LSMinimumSystemVersion':'14.0','LSUIElement':True,'NSHighResolutionCapable':True},f)
 PY
 requirement="designated => identifier \"local.zimeng.verification-code-shortcut\" and certificate leaf = H\"$identity\""
 args=(--force --sign "$identity" --timestamp=none --options runtime --requirements "=$requirement")

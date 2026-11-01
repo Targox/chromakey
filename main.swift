@@ -174,7 +174,7 @@ final class HUD: NSPanel {
     let clickSurface = OverlayClickSurface()
     var onFill: (() -> Void)?
     init() {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 288, height: 32),
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 184, height: 32),
                    styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         isOpaque = false
         backgroundColor = .clear
@@ -196,7 +196,7 @@ final class HUD: NSPanel {
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.setAccessibilityElement(false)
         contentView!.addSubview(icon)
-        label.frame = NSRect(x: 36, y: 8, width: 240, height: 16)
+        label.frame = NSRect(x: 36, y: 8, width: 136, height: 16)
         label.autoresizingMask = [.width, .height]
         label.font = .systemFont(ofSize: 12)
         label.textColor = NSColor(white: 0.92, alpha: 1)
@@ -227,7 +227,7 @@ final class HUD: NSPanel {
         return true
     }
     func show(below window: AXUIElement) {
-        label.stringValue = "Click or ⌘↩ to fill · Esc to dismiss"
+        label.stringValue = "Click or ⌘↩ to fill"
         guard position(below: window) else { orderOut(nil); return }
         orderFrontRegardless()
     }
@@ -248,7 +248,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var pending: Discovery?
     var handled: Discovery?
     var approveKey: EventHotKeyRef?
-    var dismissKey: EventHotKeyRef?
     var manualKey: EventHotKeyRef?
     var handler: EventHandlerRef?
     var busy = false
@@ -261,7 +260,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               MemoryLayout<EventHotKeyID>.size, nil, &id)
             let app = Unmanaged<AppDelegate>.fromOpaque(context).takeUnretainedValue()
             if id.id == 1 { app.approve() }
-            if id.id == 2 { app.dismiss() }
             if id.id == 3 { app.scan() }
             return noErr
         }, 1, &event, Unmanaged.passUnretained(self).toOpaque(), &handler)
@@ -286,23 +284,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func settingsRequested(_ notification: Notification) { showSettings() }
     @objc func showSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 168),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 212),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Chromakey"
             window.isReleasedWhenClosed = false
             let toggle = NSButton(checkboxWithTitle: "Enabled", target: self, action: #selector(toggleEnabled))
             toggle.state = enabled ? .on : .off
-            toggle.frame = NSRect(x: 20, y: 118, width: 260, height: 24)
+            toggle.frame = NSRect(x: 20, y: 162, width: 260, height: 24)
             window.contentView?.addSubview(toggle)
             let label = NSTextField(labelWithString: "")
-            label.frame = NSRect(x: 20, y: 86, width: 260, height: 20)
+            label.frame = NSRect(x: 20, y: 130, width: 260, height: 20)
             label.font = .systemFont(ofSize: 13)
             window.contentView?.addSubview(label)
             accessibilityLabel = label
             let permissions = NSButton(title: "Accessibility Settings…", target: self, action: #selector(settings))
             permissions.bezelStyle = .rounded
-            permissions.frame = NSRect(x: 16, y: 43, width: 268, height: 32)
+            permissions.frame = NSRect(x: 16, y: 87, width: 268, height: 32)
             window.contentView?.addSubview(permissions)
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+            let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+            let release = NSTextField(labelWithString: "Version \(version) · Build \(build)")
+            release.frame = NSRect(x: 20, y: 55, width: 260, height: 16)
+            release.font = .systemFont(ofSize: 11)
+            release.textColor = .secondaryLabelColor
+            window.contentView?.addSubview(release)
+            let copyright = NSTextField(labelWithString: "© \(Calendar.current.component(.year, from: Date())) Zimeng Xiong")
+            copyright.frame = NSRect(x: 20, y: 15, width: 128, height: 16)
+            copyright.font = .systemFont(ofSize: 10.5)
+            copyright.textColor = .secondaryLabelColor
+            window.contentView?.addSubview(copyright)
+            let github = NSTextField(labelWithAttributedString: NSAttributedString(string: "GitHub", attributes: [
+                .font: NSFont.systemFont(ofSize: 10.5),
+                .link: URL(string: "https://github.com/ZimengXiong/verification-code-shortcut")!
+            ]))
+            github.frame = NSRect(x: 150, y: 15, width: 48, height: 16)
+            github.isSelectable = true
+            github.allowsEditingTextAttributes = true
+            window.contentView?.addSubview(github)
             let quit = NSButton(title: "Quit", target: self, action: #selector(quit))
             quit.bezelStyle = .rounded
             quit.frame = NSRect(x: 210, y: 8, width: 74, height: 28)
@@ -416,7 +434,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func clear() {
         pending = nil
         if let approveKey { UnregisterEventHotKey(approveKey) }; approveKey = nil
-        if let dismissKey { UnregisterEventHotKey(dismissKey) }; dismissKey = nil
         hud?.orderOut(nil)
     }
     func poll() {
@@ -435,7 +452,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clear()
         pending = found
         _ = bind(1, UInt32(kVK_Return), UInt32(cmdKey), &approveKey)
-        _ = bind(2, UInt32(kVK_Escape), 0, &dismissKey)
         watch(found.window)
         if hud == nil {
             hud = HUD()
@@ -444,7 +460,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hud?.show(below: found.window)
     }
     @objc func scan() { handled = nil; clear(); connect() }
-    func dismiss() { handled = pending; clear(); updateTimer() }
     func approve() {
         guard !busy, let found = pending, let target = destination(),
               target.browserID == found.browserID,

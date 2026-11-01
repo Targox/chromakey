@@ -55,6 +55,7 @@ jobs:
       - name: Build
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           ./build.sh
           ditto -c -k --sequesterRsrc --keepParent 'build/Chromakey.app' "build/VerificationCodeShortcut-${VERSION}.zip"
