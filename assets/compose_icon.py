@@ -15,8 +15,9 @@ for x, angle in zip((203, 372, 541), (0, 120, 240)):
     rotated = head.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
     base.alpha_composite(rotated, (x + (280 - rotated.width) // 2,
                                   243 + (280 - rotated.height) // 2))
-base.save(root / 'AppIcon.png')
-base.resize((256, 256), Image.Resampling.LANCZOS).save(root / 'AppIcon-preview.png')
+tile = base.crop(base.getchannel('A').point(lambda alpha: 255 if alpha > 64 else 0).getbbox())
+tile.save(root / 'AppIcon.png')
+tile.resize((256, 256), Image.Resampling.LANCZOS).save(root / 'AppIcon-preview.png')
 iconset = root / 'AppIcon.iconset'
 iconset.mkdir(exist_ok=True)
 for points in (16, 32, 128, 256, 512):

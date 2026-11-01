@@ -13,5 +13,5 @@ autofill for your autofillers:
 <img src="media/settings@2x.png" width="342" alt="Chromakey settings">
 
 ```sh
-brew install --cask zimengxiong/tools/verification-code-shortcut
+brew install --cask zimengxiong/tools/chromakey
 ```
