@@ -53,6 +53,7 @@ func captureTemplate() async throws {
     configuration.height = Int(frame.height * 2)
     configuration.showsCursor = false
     configuration.ignoreShadowsSingleWindow = true
+    configuration.captureResolution = .best
     let captured = try await SCScreenshotManager.captureImage(
         contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: configuration)
     let bitmap = NSBitmapImageRep(cgImage: captured)
@@ -75,6 +76,40 @@ func captureTemplate() async throws {
         }
     }
     try bitmap.representation(using: .png, properties: [:])!.write(to: templateURL)
+}
+func captureSettings() async throws {
+    let initial = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+    let alreadyOpen = initial.windows.contains {
+        $0.owningApplication?.bundleIdentifier == "local.zimeng.verification-code-shortcut" && $0.title == "Chromakey"
+    }
+    let appURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Chromakey.app")
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = true
+    let application = try await NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
+    var selected: SCWindow?
+    for _ in 0..<40 {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        selected = content.windows.first { $0.owningApplication?.processID == application.processIdentifier && $0.title == "Chromakey" }
+        if selected != nil { break }
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    guard let window = selected else { throw NSError(domain: "Render", code: 6) }
+    let capture = SCStreamConfiguration()
+    capture.width = Int(window.frame.width * 2)
+    capture.height = Int(window.frame.height * 2)
+    capture.showsCursor = false
+    capture.ignoreShadowsSingleWindow = true
+    capture.captureResolution = .best
+    let image = try await SCScreenshotManager.captureImage(
+        contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: capture)
+    try NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])!
+        .write(to: project.appendingPathComponent("assets/readme/settings-template.png"))
+    if !alreadyOpen {
+        let root = AXUIElementCreateApplication(application.processIdentifier)
+        for window in attribute(root, kAXWindowsAttribute) as? [AXUIElement] ?? [] where text(window, kAXTitleAttribute) == "Chromakey" {
+            if let close = element(window, kAXCloseButtonAttribute) { AXUIElementPerformAction(close, kAXPressAction as CFString) }
+        }
+    }
 }
 func renderImages() throws {
     let hud = HUD()
@@ -116,6 +151,24 @@ func renderImages() throws {
         overlay.draw(in: CGRect(x: (canvas.width - view.bounds.width) / 2, y: 24, width: view.bounds.width, height: view.bounds.height))
     }
     try composite.write(to: mediaURL.appendingPathComponent("preview@2x.png"))
+    guard let settings = NSImage(contentsOf: project.appendingPathComponent("assets/readme/settings-template.png")) else {
+        throw NSError(domain: "Render", code: 7)
+    }
+    let settingsBitmap = settings.representations.compactMap { $0 as? NSBitmapImageRep }.first!
+    let settingsSize = NSSize(width: CGFloat(settingsBitmap.pixelsWide) / 2, height: CGFloat(settingsBitmap.pixelsHigh) / 2)
+    let settingsCanvas = NSSize(width: settingsSize.width + 48, height: settingsSize.height + 48)
+    let settingsData = imageData(size: settingsCanvas) {
+        NSColor(srgbRed: 0.22, green: 0.22, blue: 0.23, alpha: 1).setFill()
+        CGRect(origin: .zero, size: settingsCanvas).fill()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.4)
+        shadow.shadowBlurRadius = 18
+        shadow.shadowOffset = NSSize(width: 0, height: -8)
+        shadow.set()
+        settings.draw(in: CGRect(x: 24, y: 24, width: settingsSize.width, height: settingsSize.height))
+    }
+    try settingsData.write(to: mediaURL.appendingPathComponent("settings@2x.png"))
+
 }
 try FileManager.default.createDirectory(at: mediaURL, withIntermediateDirectories: true)
 let finished = DispatchSemaphore(value: 0)
@@ -123,6 +176,7 @@ var renderError: Error?
 Task { @MainActor in
     do {
         if CommandLine.arguments.contains("--capture-template") { try await captureTemplate() }
+        if CommandLine.arguments.contains("--capture-settings") { try await captureSettings() }
         try renderImages()
     } catch { renderError = error }
     finished.signal()
