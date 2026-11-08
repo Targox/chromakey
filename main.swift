@@ -222,6 +222,15 @@ func destination() -> Destination? {
 
 final class OverlayClickSurface: NSView {
     var onClick: (() -> Void)?
+    var onHover: ((Bool) -> Void)?
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var acceptsFirstResponder: Bool { false }
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -272,7 +281,15 @@ final class HUD: NSPanel {
         clickSurface.frame = contentView!.bounds
         clickSurface.autoresizingMask = [.width, .height]
         clickSurface.onClick = { [weak self] in self?.onFill?() }
+        clickSurface.onHover = { [weak self] in self?.highlight($0) }
         contentView!.addSubview(clickSurface)
+    }
+    func highlight(_ hovered: Bool) {
+        contentView?.layer?.backgroundColor = NSColor(white: hovered ? 0.24 : 0.16, alpha: 1).cgColor
+    }
+    override func orderOut(_ sender: Any?) {
+        highlight(false)
+        super.orderOut(sender)
     }
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
